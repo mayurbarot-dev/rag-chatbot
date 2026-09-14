@@ -1,6 +1,6 @@
 # Technical Docs AI Assistant
 
-A RAG chatbot that answers engineering questions from your own technical documentation — API references, specs, runbooks — and **cites the file and page** every answer came from.
+A RAG chatbot that answers engineering questions from your own technical documentation — API references, specs, runbooks — grounded strictly in **only what those documents say**.
 
 Built for the RAG training assignment. It implements the full pipeline end to end:
 
@@ -65,7 +65,7 @@ Single self-contained `index.html` — no build step, no framework, no CDN depen
 
 - **Dark and light themes**, toggled from the sidebar and remembered in `localStorage`.
 - **Responsive across phone, tablet and desktop.** Above 860px the sidebar is fixed; below that it becomes an off-canvas drawer opened from the hamburger, with a dimming scrim and Escape-to-close.
-- **Source citations** are collapsible, ranked, and show a relevance bar per chunk alongside the cosine score.
+- **Clean answers** — retrieval scoring and chunk provenance stay server-side; the reply is just the answer.
 - **Upload feedback** — drag-and-drop, real upload progress, per-file success/error toasts, animated knowledge-base counters.
 - **Keyboard**: `Enter` sends, `Shift+Enter` newlines, `/` focuses the input.
 - **Touch-aware** — 36px+ tap targets, 16px input font so iOS doesn't zoom on focus, safe-area insets for notched phones, and no autofocus on mobile so the keyboard doesn't ambush you.
@@ -82,7 +82,7 @@ Layout is verified by an automated pass at 360/390/820/844/1366/1920px in both t
 | Stage | Implementation |
 |---|---|
 | **Upload** | `POST /api/upload`, multipart, multiple files, drag-and-drop UI |
-| **Parsing** | `pypdf` per page, so page numbers survive into citations |
+| **Parsing** | `pypdf` per page, so page numbers survive into chunk metadata |
 | **Chunking** | 1000 chars / 150 overlap, cut at natural boundaries (newline → sentence → space) |
 | **Embedding** | Gemini `gemini-embedding-001`, batched, `RETRIEVAL_DOCUMENT` vs `RETRIEVAL_QUERY` task types |
 | **Vector storage** | JSON file (`backend/data/index.json`) — text + vector + `{file_name, page}` |
@@ -103,7 +103,7 @@ User question
   │    ├─ no results               → conversational reply
   │    ├─ best score < threshold   → "couldn't find that" fallback
   │    ├─ exact ID absent          → "not that identifier" fallback
-  │    └─ otherwise                → grounded answer + cited sources
+  │    └─ otherwise                → grounded answer from retrieved chunks
   │
   └─ both turns appended to history
 ```

@@ -256,6 +256,14 @@ GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+# The model sometimes appends "[SOURCE 3]" / "[EXCERPT 1, 2]" even when the
+# prompt tells it not to. A prompt rule is a request, not a guarantee, so the
+# markers are stripped from the generated text as well.
+CITATION_RE = re.compile(
+    r"\s*\[\s*(?:source|excerpt|src|ref)s?\s*[\d\s,&+and-]*\]",
+    re.IGNORECASE,
+)
 ID_RE = re.compile(
     r"\b(?:id|identifier|record|ticket|issue|item)\s*[:#-]?\s*([A-Za-z]{0,4}-?\d{1,6})\b",
     re.IGNORECASE,
@@ -429,6 +437,17 @@ class RAG:
             )
         )
 
+    @staticmethod
+    def _strip_citations(text: str) -> str:
+        """Remove citation markers the model added against instructions.
+
+        Punctuation stays tight: `... immediately" [SOURCE 5].` becomes
+        `... immediately".` rather than leaving a stranded space.
+        """
+        text = CITATION_RE.sub("", text)
+        text = re.sub(r" +([.,;:!?)\]])", r"\1", text)
+        return re.sub(r"[ \t]{2,}", " ", text).strip()
+
     def _grounded_answer(self, question: str, results: list[tuple[dict, float]]) -> str:
         blocks = []
         for i, (item, _score) in enumerate(results, start=1):
@@ -446,9 +465,11 @@ class RAG:
             else "\n"
         )
 
-        return self._generate(
-            GROUNDED_PROMPT.format(
-                name_line=name_line, context="\n\n".join(blocks), question=question
+        return self._strip_citations(
+            self._generate(
+                GROUNDED_PROMPT.format(
+                    name_line=name_line, context="\n\n".join(blocks), question=question
+                )
             )
         )
 
