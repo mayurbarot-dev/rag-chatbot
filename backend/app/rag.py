@@ -160,6 +160,20 @@ class Store:
                 seen.append(name)
         return seen
 
+    def remove_file(self, file_name: str) -> int:
+        """Drop every chunk belonging to one file. Returns how many were removed."""
+        before = len(self.items)
+        self.items = [
+            item
+            for item in self.items
+            if item["metadata"].get("file_name") != file_name
+        ]
+        removed = before - len(self.items)
+        if removed:
+            self._matrix = None
+            self.save()
+        return removed
+
     def clear(self) -> None:
         self.items = []
         self._matrix = None
@@ -354,6 +368,10 @@ class RAG:
         for item, vector in zip(pending, vectors):
             item["vector"] = vector
 
+        # Re-uploading a file replaces its chunks. Appending instead would leave
+        # the old copies in the index, and identical duplicates then crowd every
+        # distinct chunk out of the top-k window.
+        self.store.remove_file(file_name)
         self.store.add(pending)
         return len(pending)
 

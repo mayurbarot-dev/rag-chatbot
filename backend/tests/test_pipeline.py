@@ -68,6 +68,17 @@ check("index populated", len(r.store.items) == 6, r.store.stats())
 check("stats correct", r.store.stats() == {"documents": 2, "chunks": 6}, r.store.stats())
 check("page metadata kept", {i["metadata"]["page"] for i in r.store.items} == {1, 2})
 
+print("\n== Re-uploading a file replaces its chunks ==")
+again = (Path(r"D:\rag-chatbot\sample_docs") / "platform-runbook.pdf").read_bytes()
+r.index_pdf("platform-runbook.pdf", again)
+check("no duplicates after re-upload", len(r.store.items) == 6, r.store.stats())
+check("every chunk still distinct",
+      len({i["text"] for i in r.store.items}) == 6,
+      len({i["text"] for i in r.store.items}))
+check("other file untouched",
+      sum(1 for i in r.store.items
+          if i["metadata"]["file_name"] == "orbital-api-reference.pdf") == 3)
+
 print("\n== Empty / non-text PDF rejection ==")
 try:
     r.index_pdf("blank.pdf", b"%PDF-1.4\nnot a real pdf")
