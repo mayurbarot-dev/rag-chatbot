@@ -1,0 +1,99 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 1174 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+56 760 Td
+(Orbital Payments API - Reference \(v2.4\)) Tj T*
+() Tj T*
+(1. Authentication) Tj T*
+() Tj T*
+(All requests must include a bearer token in the Authorization header.) Tj T*
+(Tokens are issued by POST /v2/auth/token and expire after 3600 seconds.) Tj T*
+(Refresh tokens are valid for 30 days and are single-use: each refresh) Tj T*
+(invalidates the previous refresh token.) Tj T*
+() Tj T*
+(Requests without a valid token return HTTP 401 with error code) Tj T*
+(auth_token_invalid. Requests with an expired token return HTTP 401 with) Tj T*
+(error code auth_token_expired.) Tj T*
+() Tj T*
+(2. Rate Limiting) Tj T*
+() Tj T*
+(The default rate limit is 120 requests per minute per API key. Bulk) Tj T*
+(endpoints under /v2/bulk/ have a separate limit of 10 requests per minute.) Tj T*
+(Exceeding a limit returns HTTP 429 with a Retry-After header expressed in) Tj T*
+(seconds. The limit can be raised to 600 requests per minute on the) Tj T*
+(Enterprise plan by contacting support.) Tj T*
+() Tj T*
+(Rate limit state is reported on every response through three headers:) Tj T*
+(X-RateLimit-Limit, X-RateLimit-Remaining, and X-RateLimit-Reset.) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Length 1255 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+56 760 Td
+(Orbital Payments API - Reference \(v2.4\)) Tj T*
+() Tj T*
+(3. Payouts) Tj T*
+() Tj T*
+(POST /v2/payouts creates a payout. Required fields are amount_cents) Tj T*
+(\(integer\), currency \(ISO 4217\), and destination_id \(string\). The optional) Tj T*
+(idempotency_key field prevents duplicate payouts when a request is retried;) Tj T*
+(keys are retained for 24 hours.) Tj T*
+() Tj T*
+(GET /v2/payouts/{payout_id} retrieves a single payout.) Tj T*
+(GET /v2/payouts lists payouts, paginated with limit \(max 100\) and cursor.) Tj T*
+(POST /v2/payouts/{payout_id}/cancel cancels a payout that is still pending.) Tj T*
+() Tj T*
+(A payout moves through the states: pending, processing, paid, failed,) Tj T*
+(cancelled. Only payouts in the pending state can be cancelled.) Tj T*
+() Tj T*
+(4. Webhooks) Tj T*
+() Tj T*
+(Webhook payloads are signed with HMAC-SHA256 using your endpoint secret.) Tj T*
+(The signature is sent in the X-Orbital-Signature header. Verify it before) Tj T*
+(trusting the payload. Failed deliveries are retried 8 times with) Tj T*
+(exponential backoff over roughly 24 hours.) Tj T*
+() Tj T*
+(Supported events: payout.created, payout.paid, payout.failed,) Tj T*
+(payout.cancelled, and account.updated.) Tj T*
+ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 3 0 R >>
+endobj
+6 0 obj
+<< /Type /Pages /Kids [4 0 R 5 0 R] /Count 2 >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 6 0 R >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000001305 00000 n 
+0000002612 00000 n 
+0000002738 00000 n 
+0000002864 00000 n 
+0000002927 00000 n 
+trailer
+<< /Size 8 /Root 7 0 R >>
+startxref
+2976
+%%EOF

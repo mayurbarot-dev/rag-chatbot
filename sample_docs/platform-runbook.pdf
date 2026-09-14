@@ -1,0 +1,102 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 1317 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+56 760 Td
+(Platform Runbook - Incident Response) Tj T*
+() Tj T*
+(1. Severity Levels) Tj T*
+() Tj T*
+(SEV1 - Complete outage or data loss. Page the on-call lead immediately.) Tj T*
+(       Target acknowledgement: 5 minutes. Status page update: 15 minutes.) Tj T*
+(SEV2 - Major degradation affecting many customers. Acknowledge in 15) Tj T*
+(       minutes. Status page update within 30 minutes.) Tj T*
+(SEV3 - Minor degradation or a single-customer issue. Handle during) Tj T*
+(       business hours. No status page update required.) Tj T*
+() Tj T*
+(2. Escalation) Tj T*
+() Tj T*
+(The primary on-call engineer owns the incident until it is resolved or) Tj T*
+(formally handed over. If the primary does not acknowledge a SEV1 page) Tj T*
+(within 10 minutes, PagerDuty automatically escalates to the secondary,) Tj T*
+(and after a further 10 minutes to the engineering manager.) Tj T*
+() Tj T*
+(3. Rollback Procedure) Tj T*
+() Tj T*
+(Deployments are rolled back with: orbctl release rollback --env prod) Tj T*
+(--to-previous. A rollback takes about 4 minutes to propagate across all) Tj T*
+(regions. Database migrations are NOT reversed by a rollback and must be) Tj T*
+(reverted separately using the down migration.) Tj T*
+() Tj T*
+(Always post the rollback in #incidents before running it.) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Length 1160 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+56 760 Td
+(Platform Runbook - Service Ownership) Tj T*
+() Tj T*
+(4. Service Registry) Tj T*
+() Tj T*
+(Each service has a numeric identifier used in dashboards and alerts.) Tj T*
+() Tj T*
+(ID 1  - payments-api       Owner: Priya Raman      Tier: 1) Tj T*
+(        On-call rota: payments-primary. SLO: 99.95% availability.) Tj T*
+() Tj T*
+(ID 2  - ledger-worker      Owner: Marcus Webb      Tier: 1) Tj T*
+(        On-call rota: payments-primary. SLO: 99.9% availability.) Tj T*
+() Tj T*
+(ID 3  - notification-svc   Owner: Aisha Khan       Tier: 2) Tj T*
+(        On-call rota: platform-secondary. SLO: 99.5% availability.) Tj T*
+() Tj T*
+(ID 4  - reporting-batch    Owner: Tom Iverson      Tier: 3) Tj T*
+(        On-call rota: none \(business hours only\). No availability SLO.) Tj T*
+() Tj T*
+(Tier 1 services require a two-person review for any production change.) Tj T*
+(Tier 3 services may be deployed by a single engineer.) Tj T*
+() Tj T*
+(5. Maintenance Windows) Tj T*
+() Tj T*
+(Planned maintenance runs Sundays 02:00-04:00 UTC. Tier 1 services require) Tj T*
+(14 days notice to customers; Tier 2 and 3 require 3 days notice.) Tj T*
+ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 3 0 R >>
+endobj
+6 0 obj
+<< /Type /Pages /Kids [4 0 R 5 0 R] /Count 2 >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 6 0 R >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000001448 00000 n 
+0000002660 00000 n 
+0000002786 00000 n 
+0000002912 00000 n 
+0000002975 00000 n 
+trailer
+<< /Size 8 /Root 7 0 R >>
+startxref
+3024
+%%EOF
