@@ -113,8 +113,7 @@ check("scores descending", all(
     res["sources"][i]["score"] >= res["sources"][i + 1]["score"]
     for i in range(len(res["sources"]) - 1)), res["sources"])
 p = r.prompts[-1]
-check("prompt has excerpt markers", "[EXCERPT 1]" in p and "File:" in p and "Page:" in p)
-check("prompt forbids citing sources", "Do not mention source numbers" in p)
+check("prompt has SOURCE markers", "[SOURCE 1]" in p and "File:" in p and "Page:" in p)
 check("name is not evidence", "NOT documentation evidence" in p)
 
 print("\n== Route 9: second grounded question hits the runbook ==")

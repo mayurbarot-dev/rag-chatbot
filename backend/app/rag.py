@@ -256,14 +256,6 @@ GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 
-
-# The model sometimes appends "[SOURCE 3]" / "[EXCERPT 1, 2]" even when the
-# prompt tells it not to. A prompt rule is a request, not a guarantee, so the
-# markers are stripped from the generated text as well.
-CITATION_RE = re.compile(
-    r"\s*\[\s*(?:source|excerpt|src|ref)s?\s*[\d\s,&+and-]*\]",
-    re.IGNORECASE,
-)
 ID_RE = re.compile(
     r"\b(?:id|identifier|record|ticket|issue|item)\s*[:#-]?\s*([A-Za-z]{0,4}-?\d{1,6})\b",
     re.IGNORECASE,
@@ -280,7 +272,7 @@ question using ONLY the documentation context below.
 Rules:
 - Use only the supplied context. Do not use outside knowledge about the product.
 - If the context does not contain the answer, say so plainly instead of guessing.
-- Do not mention source numbers, file names, or page numbers in your answer.
+- Cite the source number(s) you used, like [SOURCE 2].
 - Keep code identifiers, endpoints, and parameter names exact.
 - Be concise and direct. Use short code spans or lists where they help.
 {name_line}
@@ -437,23 +429,12 @@ class RAG:
             )
         )
 
-    @staticmethod
-    def _strip_citations(text: str) -> str:
-        """Remove citation markers the model added against instructions.
-
-        Punctuation stays tight: `... immediately" [SOURCE 5].` becomes
-        `... immediately".` rather than leaving a stranded space.
-        """
-        text = CITATION_RE.sub("", text)
-        text = re.sub(r" +([.,;:!?)\]])", r"\1", text)
-        return re.sub(r"[ \t]{2,}", " ", text).strip()
-
     def _grounded_answer(self, question: str, results: list[tuple[dict, float]]) -> str:
         blocks = []
         for i, (item, _score) in enumerate(results, start=1):
             meta = item["metadata"]
             blocks.append(
-                f"[EXCERPT {i}] File: {meta.get('file_name')} | Page: {meta.get('page')}\n"
+                f"[SOURCE {i}] File: {meta.get('file_name')} | Page: {meta.get('page')}\n"
                 f"{item['text']}"
             )
 
@@ -465,11 +446,9 @@ class RAG:
             else "\n"
         )
 
-        return self._strip_citations(
-            self._generate(
-                GROUNDED_PROMPT.format(
-                    name_line=name_line, context="\n\n".join(blocks), question=question
-                )
+        return self._generate(
+            GROUNDED_PROMPT.format(
+                name_line=name_line, context="\n\n".join(blocks), question=question
             )
         )
 
