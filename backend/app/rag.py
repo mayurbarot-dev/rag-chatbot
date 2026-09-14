@@ -272,7 +272,7 @@ question using ONLY the documentation context below.
 Rules:
 - Use only the supplied context. Do not use outside knowledge about the product.
 - If the context does not contain the answer, say so plainly instead of guessing.
-- Cite the source number(s) you used, like [SOURCE 2].
+- Do not mention source numbers, file names, or page numbers in your answer.
 - Keep code identifiers, endpoints, and parameter names exact.
 - Be concise and direct. Use short code spans or lists where they help.
 {name_line}
@@ -434,7 +434,7 @@ class RAG:
         for i, (item, _score) in enumerate(results, start=1):
             meta = item["metadata"]
             blocks.append(
-                f"[SOURCE {i}] File: {meta.get('file_name')} | Page: {meta.get('page')}\n"
+                f"[EXCERPT {i}] File: {meta.get('file_name')} | Page: {meta.get('page')}\n"
                 f"{item['text']}"
             )
 

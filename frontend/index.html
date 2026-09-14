@@ -273,38 +273,6 @@
   .bubble ul { margin: 7px 0; padding-left: 21px; } .bubble li { margin: 4px 0; }
   .bubble strong { font-weight: 640; }
 
-  /* sources */
-  .sources { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .src-head {
-    display: flex; align-items: center; gap: 7px; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: .09em; color: var(--faint); font-weight: 700; cursor: pointer; user-select: none;
-  }
-  .src-head svg { width: 12px; height: 12px; transition: transform .2s; }
-  .src-head.open svg.chev { transform: rotate(90deg); }
-  .src-list { display: none; flex-direction: column; gap: 7px; margin-top: 10px; }
-  .src-head.open + .src-list { display: flex; }
-  .src {
-    display: flex; align-items: center; gap: 10px; background: var(--raise);
-    border: 1px solid var(--border); border-radius: 9px; padding: 8px 11px;
-  }
-  .src .rank {
-    width: 18px; height: 18px; border-radius: 5px; background: var(--grad); color: #fff; flex: none;
-    display: grid; place-items: center; font-size: 9.5px; font-weight: 700;
-  }
-  .src .meta { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 7px; }
-  .src .fn {
-    font-family: var(--mono); font-size: 11px; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .src .pg { font-size: 10.5px; color: var(--faint); flex: none; }
-  .src .score { flex: none; text-align: right; }
-  .src .sv { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--warn); }
-  .src .track {
-    display: block; width: 46px; height: 3px; border-radius: 3px;
-    background: var(--border); margin-top: 4px; overflow: hidden;
-  }
-  .src .track i { display: block; height: 100%; background: var(--grad); border-radius: 3px; }
-
   .badge {
     display: inline-flex; align-items: center; gap: 5px; font-size: 10px; text-transform: uppercase;
     letter-spacing: .07em; font-weight: 700; border-radius: 6px; padding: 3px 8px; margin-top: 11px;
@@ -332,6 +300,7 @@
   .fab.on { opacity: 1; pointer-events: auto; }
   .fab:hover { color: var(--text); transform: translateY(-2px); }
   .fab svg { width: 16px; height: 16px; }
+
 
   /* composer */
   .composer { padding: 16px 28px 20px; border-top: 1px solid var(--border); background: var(--panel); backdrop-filter: blur(16px); }
@@ -447,7 +416,6 @@
     /* message actions need a real touch target, not a 28px desktop chip */
     .act { padding: 9px 14px; min-height: 36px; font-size: 12px; }
     .act svg { width: 14px; height: 14px; }
-    .src-head { min-height: 32px; }
     .btn { padding: 12px 14px; }
     .ex { padding: 14px 15px; }
     .send { width: 42px; height: 42px; }
@@ -473,7 +441,6 @@
     .under kbd, .under { font-size: 10.5px; }
     .under > kbd, .under { gap: 6px; }
     .hint-keys { display: none; }
-    .src .track { width: 34px; }
     .fab { bottom: 96px; }
   }
 
@@ -596,11 +563,11 @@
         <div class="empty" id="empty">
           <div class="empty-ico"><svg><use href="#i-spark"/></svg></div>
           <h3>Ask your documentation anything</h3>
-          <p>Upload technical PDFs, then ask in plain English. Every grounded answer cites the exact file and page it came from.</p>
+          <p>Upload technical PDFs, then ask in plain English. Answers come straight from your documents.</p>
           <div class="steps">
             <div class="step"><b>1</b>Upload PDFs</div>
             <div class="step"><b>2</b>Ask a question</div>
-            <div class="step"><b>3</b>Check the sources</div>
+            <div class="step"><b>3</b>Get your answer</div>
           </div>
           <div class="ex-lbl">Try one of these</div>
           <div class="examples">
@@ -897,36 +864,11 @@ async function send(preset) {
 
     let html = render(res.answer);
 
-    if (res.sources?.length) {
-      const rows = res.sources.map((s, i) => `
-        <div class="src">
-          <span class="rank">${i + 1}</span>
-          <span class="meta">
-            <span class="fn">${esc(s.file_name)}</span>
-            <span class="pg">Page ${s.page}</span>
-          </span>
-          <span class="score">
-            <span class="sv">${s.score}</span>
-            <span class="track"><i style="width:${Math.max(0, Math.min(100, s.score * 100))}%"></i></span>
-          </span>
-        </div>`).join('');
-
-      html += `<div class="sources">
-          <div class="src-head open">
-            <svg class="chev"><use href="#i-chev"/></svg>
-            <svg><use href="#i-link"/></svg>
-            ${res.sources.length} source${res.sources.length > 1 ? 's' : ''}
-          </div>
-          <div class="src-list">${rows}</div>
-        </div>`;
-    } else if (!res.grounded) {
+    if (!res.grounded) {
       html += `<div class="badge">Not from documents</div>`;
     }
 
     bubble.innerHTML = html;
-
-    bubble.querySelector('.src-head')?.addEventListener('click', e =>
-      e.currentTarget.classList.toggle('open'));
 
     const acts = document.createElement('div');
     acts.className = 'acts';
