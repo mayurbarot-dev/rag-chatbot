@@ -1,17 +1,18 @@
-"""FastAPI application: routes, validation, and lazy RAG initialization."""
+"""FastAPI application: routes, validation, background ingestion, lazy RAG init."""
 
 import logging
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import config
+from .jobs import JobManager
 from .rag import RAG
 
 log = logging.getLogger("uvicorn.error")
 
-app = FastAPI(title="Technical Docs AI Assistant", version="1.0.0")
+app = FastAPI(title="Document Q&A Assistant", version="2.0.0")
 
 # Built on first use, not at import time, so /api/health can report key status
 # without ever touching Gemini.
@@ -33,8 +34,13 @@ def get_rag() -> RAG:
     return rag
 
 
+jobs = JobManager(get_rag)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+    doc_ids: list[str] | None = None
+    debug: bool = False
 
 
 @app.get("/")
@@ -58,15 +64,25 @@ def health():
         "status": "ok",
         "api_key_configured": config.has_api_key(),
         "chat_model": config.CHAT_MODEL,
-        "embedding_model": config.EMBEDDING_MODEL,
+        "embedding_provider": config.EMBEDDING_PROVIDER,
+        "embedding_model": (
+            config.LOCAL_EMBEDDING_MODEL if config.EMBEDDING_PROVIDER == "local" else config.EMBEDDING_MODEL
+        ),
+        "vision_mode": config.VISION_MODE,
+        "rerank": config.RERANK,
     }
 
 
 @app.post("/api/upload")
-async def upload(files: list[UploadFile] = File(...)):
-    engine = get_rag()
+async def upload(files: list[UploadFile] = File(...), wait: bool = Query(False)):
+    """Queue PDFs for indexing. Returns job ids; poll /api/jobs/{id}.
+
+    `?wait=true` blocks until every job finishes (scripts and tests).
+    """
+    get_rag()  # fail fast with 503 when no key is configured
     max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
-    results = []
+    accepted = []
+    payloads = []
 
     for upload_file in files:
         name = (upload_file.filename or "").strip()
@@ -74,7 +90,6 @@ async def upload(files: list[UploadFile] = File(...)):
             raise HTTPException(status_code=400, detail="A file was uploaded without a name.")
         if not name.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail=f"'{name}' is not a PDF.")
-
         data = await upload_file.read()
         if len(data) > max_bytes:
             raise HTTPException(
@@ -83,27 +98,39 @@ async def upload(files: list[UploadFile] = File(...)):
             )
         if not data:
             raise HTTPException(status_code=400, detail=f"'{name}' is empty.")
+        if not data.startswith(b"%PDF"):
+            raise HTTPException(status_code=400, detail=f"'{name}' does not look like a PDF file.")
+        payloads.append((name, data))
 
-        try:
-            chunks = engine.index_pdf(name, data)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            log.exception("Indexing failed for %s", name)
-            raise HTTPException(
-                status_code=400, detail=f"Could not index '{name}': {exc}"
-            ) from exc
+    for name, data in payloads:
+        accepted.append(jobs.submit(name, data))
 
-        results.append({"file_name": name, "chunks": chunks})
+    if wait:
+        finished = [jobs.wait(j["id"]) for j in accepted]
+        failed = [j for j in finished if j and j["status"] == "error"]
+        if failed:
+            raise HTTPException(status_code=400, detail=f"Could not index '{failed[0]['file_name']}': {failed[0]['error']}")
+        engine = get_rag()
+        return {
+            "indexed": [{"file_name": j["file_name"], "chunks": j["chunks"]} for j in finished],
+            "stats": engine.store.stats(),
+        }
+    return {"jobs": accepted}
 
-    return {"indexed": results, "stats": engine.store.stats()}
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str):
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job.")
+    return job
 
 
 @app.post("/api/ask")
 def ask(body: AskRequest):
     engine = get_rag()
     try:
-        return engine.ask(body.question)
+        return engine.ask(body.question, doc_ids=body.doc_ids or None, debug=body.debug)
     except Exception as exc:
         log.exception("Ask failed")
         raise HTTPException(status_code=500, detail=f"Failed to answer: {exc}") from exc
@@ -112,7 +139,32 @@ def ask(body: AskRequest):
 @app.get("/api/stats")
 def stats():
     engine = get_rag()
-    return {**engine.store.stats(), "files": engine.store.file_names()}
+    out = {**engine.store.stats(), "files": engine.store.file_names()}
+    if engine.store.legacy_index:
+        out["warning"] = (
+            "An index from the previous version was found but is not compatible. "
+            "Upload your documents again to re-index them."
+        )
+    return out
+
+
+@app.get("/api/documents")
+def documents():
+    engine = get_rag()
+    docs = engine.store.documents()
+    for d in docs:
+        d.pop("glossary", None)
+        d.pop("aliases", None)
+    return {"documents": docs}
+
+
+@app.delete("/api/documents/{doc_id}")
+def delete_document(doc_id: str):
+    engine = get_rag()
+    if doc_id not in engine.store.docs:
+        raise HTTPException(status_code=404, detail="Unknown document.")
+    removed = engine.store.remove_document(doc_id)
+    return {"status": "deleted", "chunks_removed": removed, "stats": engine.store.stats()}
 
 
 @app.delete("/api/knowledge-base")

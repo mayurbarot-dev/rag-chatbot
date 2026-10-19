@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Technical Docs AI Assistant</title>
+<title>Document Q&amp;A Assistant</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%234f9cf9'/><stop offset='1' stop-color='%237c5cff'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23g)'/><path d='M30 32h40M30 50h40M30 68h24' stroke='white' stroke-width='9' stroke-linecap='round'/></svg>">
 <style>
   /* ============================ tokens ============================ */
@@ -310,6 +310,38 @@
     letter-spacing: .07em; font-weight: 700; border-radius: 6px; padding: 3px 8px; margin-top: 11px;
     color: var(--warn); border: 1px solid rgba(227,179,65,.32); background: rgba(227,179,65,.1);
   }
+  .badge.warn-chip { color: var(--bad); border-color: rgba(248,81,73,.32); background: rgba(248,81,73,.08); text-transform: none; letter-spacing: 0; font-weight: 600; }
+
+  /* phase 2: documents, scope, richer citations */
+  .file { flex-wrap: wrap; }
+  .file .fname { flex: 1; min-width: 0; }
+  .file .prof {
+    font-family: inherit; font-size: 9px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700;
+    padding: 1px 6px; border-radius: 5px; color: var(--accent-2); background: rgba(124,92,255,.14); flex: none;
+  }
+  .file .meta2 { width: 100%; font-family: inherit !important; font-size: 10.5px !important; color: var(--faint); padding-left: 20px; }
+  .file .del {
+    flex: none; width: 24px; height: 24px; border-radius: 6px; border: 1px solid transparent;
+    background: none; color: var(--faint); display: grid; place-items: center; padding: 0;
+  }
+  .file .del:hover { color: var(--bad); border-color: rgba(248,81,73,.4); }
+  .file .del svg { width: 12px; height: 12px; }
+  .scope {
+    font: inherit; font-size: 11px; color: var(--muted); background: var(--panel-solid); border: 1px solid var(--border);
+    border-radius: 20px; padding: 3px 9px; max-width: 220px; min-width: 0; min-height: 26px; flex: 0 1 auto;
+  }
+  .chat-head { min-width: 0; }
+  .chat-head .pill { min-width: 0; flex: none; }
+  .src { align-items: flex-start; }
+  .src .meta { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .src .row1 { display: flex; align-items: baseline; gap: 7px; min-width: 0; max-width: 100%; }
+  .src .sec { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .src .kind {
+    font-size: 9px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; padding: 1px 6px;
+    border-radius: 5px; color: var(--accent); background: rgba(79,156,249,.14); flex: none;
+  }
+  .src .exc { font-size: 11.5px; color: var(--faint); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .toast .stage { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
   .acts { display: flex; gap: 6px; margin-top: 11px; }
   .act {
     font-size: 11px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border);
@@ -460,6 +492,9 @@
     .inner { gap: 16px; }
     .composer { padding: 9px 11px calc(12px + env(safe-area-inset-bottom)); }
     .chat-head { padding: 10px 11px; }
+    /* The scope selector says what is searched; the doc-count pill is redundant here. */
+    .chat-head #kbPill { display: none; }
+    .scope { max-width: 46vw; }
     .bubble { max-width: 92%; padding: 12px 14px; }
     .avatar { width: 27px; height: 27px; border-radius: 9px; font-size: 10px; }
     .empty { padding: 14px 0; }
@@ -533,7 +568,7 @@
       <div class="logo"><svg><use href="#i-bolt"/></svg></div>
       <div class="brand-txt">
         <h1>Docs Assistant</h1>
-        <p>RAG over your technical docs</p>
+        <p>RAG over reports, specs and manuals</p>
       </div>
       <button class="icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme">
         <svg><use href="#i-sun" id="themeIcon"/></svg>
@@ -548,7 +583,7 @@
       <div class="drop" id="drop">
         <div class="drop-ico"><svg><use href="#i-up"/></svg></div>
         <div class="t">Drop PDFs here</div>
-        <div class="s">or click to browse · max 20 MB each</div>
+        <div class="s" id="dropHint">or click to browse · max 30 MB each</div>
         <div class="bar" id="bar"><i id="barFill"></i></div>
       </div>
       <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
@@ -587,6 +622,9 @@
       </button>
       <span class="t">Chat</span>
       <span class="pill" id="kbPill"><svg style="width:12px;height:12px"><use href="#i-doc"/></svg><span id="kbPillTxt">No documents</span></span>
+      <select class="scope" id="scope" title="Which documents to search" aria-label="Search scope">
+        <option value="">All documents</option>
+      </select>
       <span class="spacer"></span>
       <span class="pill mdl-pill" id="statusPill"><span class="dot" id="headDot"></span><span id="statusTxt">Checking…</span></span>
     </div>
@@ -595,8 +633,8 @@
       <div class="inner" id="inner">
         <div class="empty" id="empty">
           <div class="empty-ico"><svg><use href="#i-spark"/></svg></div>
-          <h3>Ask your documentation anything</h3>
-          <p>Upload technical PDFs, then ask in plain English. Every grounded answer cites the exact file and page it came from.</p>
+          <h3>Ask your documents anything</h3>
+          <p>Upload PDFs — long reports, data-heavy sheets, manuals — then ask in plain English. Every grounded answer cites the section and page it came from, including tables, charts and footnotes.</p>
           <div class="steps">
             <div class="step"><b>1</b>Upload PDFs</div>
             <div class="step"><b>2</b>Ask a question</div>
@@ -604,14 +642,14 @@
           </div>
           <div class="ex-lbl">Try one of these</div>
           <div class="examples">
-            <div class="ex" data-q="What is the default rate limit?">
-              <span class="tag g">Grounded</span>What is the default rate limit?
+            <div class="ex" data-q="What is the growth outlook for South Asia in this report?">
+              <span class="tag g">Section</span>What is the growth outlook for South Asia?
               <svg class="arrow" style="width:14px;height:14px"><use href="#i-chev"/></svg></div>
-            <div class="ex" data-q="Who owns service ID 2?">
-              <span class="tag g">Grounded</span>Who owns service ID 2?
+            <div class="ex" data-q="What is the iMac's power consumption in sleep mode at 115V?">
+              <span class="tag g">Table</span>What is the iMac's sleep power at 115V?
               <svg class="arrow" style="width:14px;height:14px"><use href="#i-chev"/></svg></div>
-            <div class="ex" data-q="Who owns service ID 006?">
-              <span class="tag s">Guardrail</span>Who owns service ID 006?
+            <div class="ex" data-q="What does the report say about the economic impact of the FIFA World Cup?">
+              <span class="tag s">Guardrail</span>What does it say about the FIFA World Cup?
               <svg class="arrow" style="width:14px;height:14px"><use href="#i-chev"/></svg></div>
             <div class="ex" data-q="My name is Dev">
               <span class="tag m">Memory</span>My name is Dev
@@ -626,7 +664,7 @@
     <div class="composer">
       <div class="wrap">
         <div class="inputwrap">
-          <textarea id="input" rows="1" placeholder="Ask about your documentation…" maxlength="2000"></textarea>
+          <textarea id="input" rows="1" placeholder="Ask about your documents…" maxlength="2000"></textarea>
           <button class="send" id="send" title="Send"><svg><use href="#i-send"/></svg></button>
         </div>
         <div class="under">
@@ -703,12 +741,19 @@ function render(text) {
   const html = s.split(/\n{2,}/).map(part => {
     const m = part.match(/^ (\d+) $/);
     if (m) return blocks[+m[1]];
-    const lines = part.split('\n');
-    if (lines.some(l => l.trim()) && lines.every(l => /^\s*[-*•]\s+/.test(l) || !l.trim())) {
-      return `<ul>${lines.filter(l => l.trim())
-        .map(l => `<li>${l.replace(/^\s*[-*•]\s+/, '')}</li>`).join('')}</ul>`;
+    // Group consecutive bullet lines into a list, wherever they appear in the
+    // block, so "2. Heading:\n* item\n* item" renders as text + list.
+    const out = [];
+    let text = [], items = [];
+    const flushText = () => { if (text.length) out.push(`<p>${text.join('<br>')}</p>`); text = []; };
+    const flushList = () => { if (items.length) out.push(`<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>`); items = []; };
+    for (const l of part.split('\n')) {
+      if (!l.trim()) continue;
+      if (/^\s*[-*•]\s+/.test(l)) { flushText(); items.push(l.replace(/^\s*[-*•]\s+/, '')); }
+      else { flushList(); text.push(l); }
     }
-    return `<p>${lines.join('<br>')}</p>`;
+    flushText(); flushList();
+    return out.join('');
   }).join('');
 
   return html.replace(/ (\d+) /g, (_, i) => blocks[+i]);
@@ -802,12 +847,47 @@ async function refreshStats() {
       ? `${s.documents} doc${s.documents > 1 ? 's' : ''} · ${s.chunks} chunks`
       : 'No documents';
 
-    const files = s.files || [];
-    $('fileList').innerHTML = files.length
-      ? files.map(f => `<div class="file"><span class="fi"><svg><use href="#i-doc"/></svg></span><span>${esc(f)}</span></div>`).join('')
-      : '<div class="none">Nothing indexed yet.</div>';
+    if (s.warning) toast(s.warning, 'info');
+    await refreshDocuments();
   } catch (_) { /* /api/stats needs a key; health already reports that */ }
 }
+
+async function refreshDocuments() {
+  const { documents = [] } = await api('/api/documents');
+  $('fileList').innerHTML = documents.length
+    ? documents.map(d => {
+        const kinds = d.by_kind || {};
+        const extra = ['table', 'visual', 'footnote'].filter(k => kinds[k])
+          .map(k => `${kinds[k]} ${k === 'visual' ? 'chart' : k}${kinds[k] > 1 ? 's' : ''}`).join(' · ');
+        return `<div class="file" data-doc="${esc(d.doc_id)}">
+          <span class="fi"><svg><use href="#i-doc"/></svg></span>
+          <span class="fname" title="${esc(d.title || d.file_name)}">${esc(d.file_name)}</span>
+          <span class="prof">${esc(d.profile || '')}</span>
+          <button class="del" title="Remove this document" aria-label="Remove ${esc(d.file_name)}"><svg><use href="#i-x"/></svg></button>
+          <span class="meta2">${d.pages} pages · ${d.chunks} chunks${extra ? ' · ' + esc(extra) : ''}</span>
+        </div>`;
+      }).join('')
+    : '<div class="none">Nothing indexed yet.</div>';
+
+  const scope = $('scope'), current = scope.value;
+  scope.innerHTML = '<option value="">All documents</option>' +
+    documents.map(d => `<option value="${esc(d.doc_id)}">${esc(d.file_name)}</option>`).join('');
+  scope.value = documents.some(d => d.doc_id === current) ? current : '';
+  scope.style.display = documents.length > 1 ? '' : 'none';
+}
+
+$('fileList').addEventListener('click', async e => {
+  const btn = e.target.closest('.del');
+  if (!btn) return;
+  const row = btn.closest('.file');
+  const name = row.querySelector('.fname').textContent;
+  if (!await confirmBox('Remove document?', `"${name}" and all of its chunks will be removed from the knowledge base.`, 'Remove')) return;
+  try {
+    await api(`/api/documents/${encodeURIComponent(row.dataset.doc)}`, { method: 'DELETE' });
+    toast(`${name} removed.`, 'ok');
+    refreshStats();
+  } catch (err) { toast(err.message, 'err'); }
+});
 
 async function checkHealth() {
   try {
@@ -856,15 +936,17 @@ function uploadFiles(fileList) {
   };
 
   xhr.onload = () => {
-    $('barFill').style.width = '100%';
     let body = null;
     try { body = JSON.parse(xhr.responseText); } catch (_) {}
-    setTimeout(finish, 220);
 
     if (xhr.status >= 200 && xhr.status < 300) {
-      (body?.indexed || []).forEach(r => toast(`${r.file_name} — ${r.chunks} chunks indexed`, 'ok'));
-      refreshStats();
+      // The upload is accepted; indexing runs in the background. Each job is
+      // polled so long documents show live stage progress instead of a spinner.
+      pending.remove();
+      const jobs = body?.jobs || [];
+      Promise.all(jobs.map(trackJob)).then(() => { finish(); refreshStats(); });
     } else {
+      finish();
       const d = body?.detail;
       toast(typeof d === 'string' ? d : `Upload failed (${xhr.status})`, 'err');
     }
@@ -872,6 +954,59 @@ function uploadFiles(fileList) {
 
   xhr.onerror = () => { finish(); toast('Upload failed — the server did not respond.', 'err'); };
   xhr.send(form);
+}
+
+async function trackJob(job) {
+  const el = toast(job.file_name, 'info');
+  el.lastChild.innerHTML = `${esc(job.file_name)}<span class="stage">Waiting…</span>`;
+  const stage = el.querySelector('.stage');
+  while (true) {
+    let j;
+    try { j = await api(`/api/jobs/${job.id}`); }
+    catch (err) { el.remove(); toast(`${job.file_name}: ${err.message}`, 'err'); return; }
+    const pct = j.total ? ` ${j.done}/${j.total}` : '';
+    stage.textContent = `${j.stage_label}${pct}`;
+    $('barFill').style.width = j.total ? `${Math.round(100 * j.done / j.total)}%` : '96%';
+    if (j.status === 'done') {
+      el.remove();
+      toast(`${j.file_name} — ${j.chunks} chunks indexed`, 'ok');
+      (j.warnings || []).slice(0, 2).forEach(w => toast(`${j.file_name}: ${w}`, 'info'));
+      return;
+    }
+    if (j.status === 'error') {
+      el.remove();
+      toast(`${j.file_name}: ${j.error}`, 'err');
+      return;
+    }
+    await new Promise(r => setTimeout(r, 900));
+  }
+}
+
+const KIND_LABEL = { table: 'table', figure: 'figure', visual: 'chart', footnote: 'footnote', text: 'text' };
+
+function sourceRow(s, i) {
+  const pages = s.page === s.page_end ? `PDF p.${s.page}` : `PDF pp.${s.page}–${s.page_end}`;
+  const section = (s.section_path || []).slice(-2).join(' › ');
+  // Reranker scores are 0–3; with RERANK=off the score is a cosine similarity.
+  const rel = s.score == null ? null : (s.score > 1 ? s.score / 3 : s.score);
+  const relTxt = s.score == null ? '' : (s.score > 1 ? `${s.score}/3` : s.score);
+  return `
+    <div class="src">
+      <span class="rank">${i + 1}</span>
+      <span class="meta">
+        <span class="row1">
+          <span class="fn">${esc(s.file_name)}</span>
+          <span class="pg">p.${esc(s.page_label)} · ${pages}</span>
+          <span class="kind">${KIND_LABEL[s.kind] || esc(s.kind)}</span>
+        </span>
+        ${section ? `<span class="sec">${esc(section)}</span>` : ''}
+        ${s.excerpt ? `<span class="exc">${esc(s.excerpt)}</span>` : ''}
+      </span>
+      ${rel == null ? '' : `<span class="score">
+        <span class="sv">${relTxt}</span>
+        <span class="track"><i style="width:${Math.max(0, Math.min(100, rel * 100))}%"></i></span>
+      </span>`}
+    </div>`;
 }
 
 /* ---------------- ask ---------------- */
@@ -892,24 +1027,18 @@ async function send(preset) {
     const res = await api('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question, doc_ids: $('scope').value ? [$('scope').value] : null })
     });
 
     let html = render(res.answer);
 
+    const unsupported = res.grounding?.unsupported || [];
+    if (unsupported.length) {
+      html += `<div class="badge warn-chip" title="These figures were not found in the retrieved sources">⚠ Check: ${esc(unsupported.join(', '))} not found in the sources</div>`;
+    }
+
     if (res.sources?.length) {
-      const rows = res.sources.map((s, i) => `
-        <div class="src">
-          <span class="rank">${i + 1}</span>
-          <span class="meta">
-            <span class="fn">${esc(s.file_name)}</span>
-            <span class="pg">Page ${s.page}</span>
-          </span>
-          <span class="score">
-            <span class="sv">${s.score}</span>
-            <span class="track"><i style="width:${Math.max(0, Math.min(100, s.score * 100))}%"></i></span>
-          </span>
-        </div>`).join('');
+      const rows = res.sources.map(sourceRow).join('');
 
       html += `<div class="sources">
           <div class="src-head">

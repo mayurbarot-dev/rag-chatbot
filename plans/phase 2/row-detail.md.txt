@@ -1,0 +1,70 @@
+Now that we have completed the initial Chatbot implementation, we’re moving to the next level with an Advanced RAG hands-on challenge.
+
+For this exercise, we have selected 3 documents with intentionally different structures. The objective is to understand how RAG needs to be designed differently for real-world documents instead of applying the same approach everywhere.
+
+📚 The 3 Documents
+1️⃣ GPO Annual Report – Narrative Text
+
+Primarily plain, narrative text
+
+Serves as the baseline RAG use case
+
+Focus on document ingestion, chunking, embeddings, retrieval, and response generation
+
+2️⃣ World Bank Economic Report – ~200 Pages
+
+Large document with multiple chapters and sections
+
+Focus on handling long and structured documents
+
+Key challenge: hierarchical chunking, section-aware retrieval, and context management
+
+3️⃣ Apple iMac Environmental Report – Charts, Tables & Footnotes
+
+Shorter document, but important information is distributed across charts, tables, and footnotes
+
+Focus on extracting information beyond simple text
+
+Key challenge: tables, visuals, footnotes, and document-aware retrieval
+
+🎯 What We Expect
+Your RAG solution should be able to:
+
+Handle different document structures effectively
+
+Implement an appropriate chunking strategy
+
+Generate and store embeddings
+
+Retrieve relevant information accurately
+
+Handle large documents efficiently
+
+Extract information from tables, charts, and footnotes where required
+
+Generate answers grounded in the source documents
+
+Minimize hallucinations and irrelevant responses
+
+Each document has sample test questions included so you can validate how well your solution performs.
+
+📎 Detailed requirements, documents, and sample questions are available in the attached document.
+
+💡 Think Beyond the Basic RAG
+The goal is not simply to make the chatbot answer questions.
+
+Think about:
+
+Document → Parsing → Chunking → Embedding → Retrieval → Reranking → Context → LLM → Evaluation
+
+Consider where you can improve the pipeline for each type of document and why a particular approach works better.
+
+This is intended to be a real-world, production-oriented RAG challenge and a great opportunity for everyone to experiment with different approaches.
+
+🤝 Need Help?
+
+If you need any guidance or get stuck during the implementation, please reach out to your AI Guide, TM, or TL. They will be happy to help you move forward.
+
+🔥 Let's build something that goes beyond a basic chatbot!
+
+PFA.

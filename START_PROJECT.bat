@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
-title Technical Docs AI Assistant
+title Document Q&A Assistant
 
 cd /d "%~dp0"
 
 echo ============================================================
-echo   Technical Docs AI Assistant - Starting up
+echo   Document Q&A Assistant - Starting up
 echo ============================================================
 echo.
 
@@ -76,7 +76,7 @@ if not exist "backend\.env" (
 
 REM ---------- 5. Start the backend ----------
 echo [5/6] Starting the server...
-start "Technical Docs AI Assistant - Server" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+start "Document Q&A Assistant - Server" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
 
 REM ---------- 6. Wait for health, then open the browser ----------
 echo [6/6] Waiting for the server to come up...

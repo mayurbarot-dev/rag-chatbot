@@ -1,5 +1,5 @@
 backend/.env
 backend/.venv/
-backend/data/*.json
+backend/data/
 __pycache__/
 *.pyc

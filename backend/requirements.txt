@@ -1,7 +1,9 @@
 fastapi
 uvicorn[standard]
 python-multipart
+pymupdf
 pypdf
 numpy
 python-dotenv
 google-genai
+fastembed

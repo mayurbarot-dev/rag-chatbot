@@ -1,184 +1,28 @@
-"""Core RAG implementation: parsing, chunking, embedding, vector store, memory, retrieval."""
+"""Orchestrator: the ingest pipeline, the routing tree, memory and answering.
+
+Ingest:  parse -> tables -> key/value merge -> footnotes -> structure -> vision
+         -> chunk -> embed -> store
+Answer:  memory / small talk routing -> retrieve (scope, hybrid, rerank)
+         -> exact-ID guardrail -> grounded generation -> numeric check
+"""
 
 import json
 import re
-from io import BytesIO
-from typing import Any, Iterator
-
-import numpy as np
-from google import genai
-from google.genai import types
-from pypdf import PdfReader
+import threading
+from datetime import datetime, timezone
+from typing import Any
 
 from . import config
-
-# --------------------------------------------------------------------------
-# Parsing and chunking
-# --------------------------------------------------------------------------
-
-
-def normalize(text: str) -> str:
-    """Strip nulls, collapse intra-line whitespace, drop empty lines."""
-    if not text:
-        return ""
-    text = text.replace("\x00", "")
-    lines = []
-    for line in text.splitlines():
-        line = re.sub(r"[ \t\r\f\v]+", " ", line).strip()
-        if line:
-            lines.append(line)
-    return "\n".join(lines)
-
-
-def extract_pages(data: bytes) -> Iterator[tuple[int, str]]:
-    """Yield (page_number, normalized_text) for every page that has extractable text."""
-    reader = PdfReader(BytesIO(data))
-    for page_no, page in enumerate(reader.pages, start=1):
-        try:
-            raw = page.extract_text() or ""
-        except Exception:
-            raw = ""
-        text = normalize(raw)
-        if text:
-            yield page_no, text
-
-
-def chunk_text(text: str, size: int, overlap: int) -> list[str]:
-    """Split text into overlapping chunks, preferring natural boundaries.
-
-    Boundary priority within the tail of each window: newline, sentence end, space.
-    A boundary landing in the first half of the window is ignored -- a stunted chunk
-    is worse than a hard cut.
-    """
-    if overlap >= size:
-        raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
-    if not text:
-        return []
-
-    chunks: list[str] = []
-    start = 0
-    length = len(text)
-
-    while start < length:
-        end = min(start + size, length)
-        if end < length:
-            window = text[start:end]
-            min_keep = size // 2
-            cut = -1
-            for pattern in ("\n", (". ", "! ", "? "), " "):
-                if isinstance(pattern, tuple):
-                    found = max(window.rfind(p) for p in pattern)
-                    found = found + 1 if found != -1 else -1
-                else:
-                    found = window.rfind(pattern)
-                if found > min_keep:
-                    cut = found
-                    break
-            if cut != -1:
-                end = start + cut
-
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-
-        if end >= length:
-            break
-        start = max(end - overlap, start + 1)
-
-    return chunks
-
-
-# --------------------------------------------------------------------------
-# Vector store
-# --------------------------------------------------------------------------
-
-
-class Store:
-    """Minimal persistent vector store backed by a single JSON file."""
-
-    def __init__(self, path=None):
-        self.path = path or config.INDEX_FILE
-        self.items: list[dict[str, Any]] = []
-        self._matrix: np.ndarray | None = None
-        self.load()
-
-    def load(self) -> None:
-        if self.path.exists():
-            try:
-                self.items = json.loads(self.path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                self.items = []
-        else:
-            self.items = []
-        self._matrix = None
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.items), encoding="utf-8")
-
-    def add(self, items: list[dict[str, Any]]) -> None:
-        self.items.extend(items)
-        self._matrix = None
-        self.save()
-
-    def _vectors(self) -> np.ndarray:
-        if self._matrix is None:
-            self._matrix = np.array(
-                [item["vector"] for item in self.items], dtype=np.float32
-            )
-        return self._matrix
-
-    def search(self, query_vector: list[float], top_k: int) -> list[tuple[dict, float]]:
-        """Cosine similarity across the whole index, highest score first."""
-        if not self.items:
-            return []
-
-        q = np.array(query_vector, dtype=np.float32)
-        q_norm = np.linalg.norm(q)
-        if q_norm == 0:
-            return []
-
-        matrix = self._vectors()
-        norms = np.linalg.norm(matrix, axis=1)
-        # Guard zero-norm rows so they score 0 instead of producing NaN.
-        safe = np.where(norms == 0, 1.0, norms)
-        scores = (matrix @ q) / (safe * q_norm)
-        scores = np.where(norms == 0, 0.0, scores)
-
-        order = np.argsort(scores)[::-1][:top_k]
-        return [(self.items[i], float(scores[i])) for i in order]
-
-    def stats(self) -> dict[str, int]:
-        names = {item["metadata"].get("file_name") for item in self.items}
-        return {"documents": len(names), "chunks": len(self.items)}
-
-    def file_names(self) -> list[str]:
-        seen: list[str] = []
-        for item in self.items:
-            name = item["metadata"].get("file_name")
-            if name and name not in seen:
-                seen.append(name)
-        return seen
-
-    def remove_file(self, file_name: str) -> int:
-        """Drop every chunk belonging to one file. Returns how many were removed."""
-        before = len(self.items)
-        self.items = [
-            item
-            for item in self.items
-            if item["metadata"].get("file_name") != file_name
-        ]
-        removed = before - len(self.items)
-        if removed:
-            self._matrix = None
-            self.save()
-        return removed
-
-    def clear(self) -> None:
-        self.items = []
-        self._matrix = None
-        self.save()
-
+from .chunking import make_chunks
+from .footnotes import extract_footnotes
+from .grounding import unsupported_numbers
+from .llm import LLM
+from .parsing import parse_pdf
+from .retrieval import retrieve
+from .store import Store
+from .structure import build_structure
+from .tables import extract_tables, merge_key_values
+from .vision import select_pages, transcribe
 
 # --------------------------------------------------------------------------
 # Memory
@@ -241,12 +85,6 @@ class Memory:
 # Routing patterns
 # --------------------------------------------------------------------------
 
-DOC_KEYWORDS = {
-    "pdf", "file", "document", "documentation", "docs", "page", "chapter",
-    "section", "uploaded", "id", "identifier", "record", "spec", "api",
-    "endpoint", "parameter", "config", "runbook",
-}
-
 NAME_QUESTION_RE = re.compile(
     r"\b(what'?s my name|what is my name|do you remember my name|who am i)\b",
     re.IGNORECASE,
@@ -275,38 +113,50 @@ ID_RE = re.compile(
     re.IGNORECASE,
 )
 
+NOT_FOUND = (
+    "I couldn't find anything in the uploaded documents that answers that. If it "
+    "should be in there, try rephrasing with the terms the document uses - or upload "
+    "the file that covers it."
+)
 
 # --------------------------------------------------------------------------
-# RAG
+# Prompts
 # --------------------------------------------------------------------------
 
-GROUNDED_PROMPT = """You are a technical documentation assistant. Answer the engineer's \
-question using ONLY the documentation context below.
+GROUNDED_PROMPT = """You are a document assistant. Answer the question using ONLY the \
+sources below, which were retrieved from the user's uploaded documents.
 
 Rules:
-- Use only the supplied context. Do not use outside knowledge about the product.
-- If the context does not contain the answer, say so plainly instead of guessing.
+- Use only the sources. Do not add outside knowledge, even if you think you know the answer.
+- Give exact figures with their units and the year, period, region or product \
+configuration they apply to, as written in the sources.
+- The sources may cover several regions, chapters, years or configurations. Use only \
+the ones the question asks about, and say which one you used.
+- If the sources disagree (for example a table and a footnote), report both and say \
+that they differ.
+- If a figure comes from a chart transcription, say it was read from the chart.
+- If the sources do not contain the answer, say plainly that the documents do not say, \
+instead of guessing.
 - Cite the source number(s) you used, like [SOURCE 2].
-- Keep code identifiers, endpoints, and parameter names exact.
-- Be concise and direct. Use short code spans or lists where they help.
+- Be concise and direct. Use a short list when it helps.
 {name_line}
-TECHNICAL DOCUMENTATION CONTEXT:
+SOURCES:
 {context}
 
 QUESTION:
 {question}
-
+{parts}
 ANSWER:"""
 
-GENERAL_PROMPT = """You are a friendly technical documentation assistant. This message is \
-NOT a documentation lookup, so answer conversationally.
+GENERAL_PROMPT = """You are a friendly document assistant. This message is NOT a \
+document lookup, so answer conversationally.
 
 Rules:
 - Respond naturally to greetings and small talk.
 - Use remembered facts about the user when relevant.
 - Never claim that something appears in the uploaded documents.
 - If the user seems to want document information that is unavailable, explain politely \
-that you could not find it in the uploaded documentation and suggest uploading the \
+that you could not find it in the uploaded documents and suggest uploading the \
 relevant file.
 - Keep it concise unless more detail is requested.
 {name_line}{doc_line}
@@ -318,67 +168,106 @@ USER MESSAGE:
 
 RESPONSE:"""
 
+RETRY_NOTE = """
+
+IMPORTANT: a previous draft of this answer contained these figures, which do not \
+appear in the sources: {numbers}. Write the answer again using only figures that \
+appear in the sources."""
+
+
+def _source_label(i: int, b: dict) -> str:
+    path = " › ".join(b["section_path"][-3:]) or "(no section)"
+    pages = b["page_label"]
+    pdf = f"PDF p.{b['page']}" if b["page"] == b["page_end"] else f"PDF pp.{b['page']}-{b['page_end']}"
+    kind = {"table": "table", "figure": "figure", "visual": "chart transcription",
+            "footnote": "footnote"}.get(b["kind"], "text")
+    return f"[SOURCE {i}] {b['file_name']} · {path} · p.{pages} ({pdf}) · {kind}"
+
 
 class RAG:
-    def __init__(self):
-        if not config.has_api_key():
+    def __init__(self, llm: LLM | None = None, store: Store | None = None, memory: Memory | None = None):
+        if llm is None and not config.has_api_key():
             raise RuntimeError("No Gemini API key configured.")
-        self.client = genai.Client(api_key=config.API_KEY)
-        self.store = Store()
-        self.memory = Memory()
-
-    # -- embeddings -------------------------------------------------------
-
-    def _embed(self, texts: list[str], task_type: str) -> list[list[float]]:
-        vectors: list[list[float]] = []
-        for i in range(0, len(texts), config.EMBED_BATCH_SIZE):
-            batch = texts[i : i + config.EMBED_BATCH_SIZE]
-            response = self.client.models.embed_content(
-                model=config.EMBEDDING_MODEL,
-                contents=batch,
-                config=types.EmbedContentConfig(task_type=task_type),
-            )
-            vectors.extend(list(e.values) for e in response.embeddings)
-        return vectors
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embed(texts, "RETRIEVAL_DOCUMENT")
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._embed([text], "RETRIEVAL_QUERY")[0]
+        self.llm = llm or LLM()
+        self.store = store or Store()
+        self.memory = memory or Memory()
+        self.ingest_lock = threading.Lock()
 
     # -- indexing ---------------------------------------------------------
 
-    def index_pdf(self, file_name: str, data: bytes) -> int:
-        """Parse, chunk, embed, and store one PDF. Returns the chunk count."""
-        pending: list[dict[str, Any]] = []
-        for page_no, text in extract_pages(data):
-            for chunk in chunk_text(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP):
-                pending.append(
-                    {"text": chunk, "metadata": {"file_name": file_name, "page": page_no}}
+    def index_pdf(self, file_name: str, data: bytes, progress=None) -> int:
+        """Run the full ingest pipeline for one PDF. Returns the chunk count."""
+
+        def report(stage: str, done: int = 0, total: int = 0):
+            if progress:
+                progress(stage, done, total)
+
+        with self.ingest_lock:
+            report("parsing")
+            doc = parse_pdf(data, file_name)
+            report("layout", 0, doc.page_count)
+            for page in doc.pages:
+                if page.skip:
+                    continue
+                if config.TABLES:
+                    extract_tables(page, doc.body_size)
+                merge_key_values(page)
+            notes = extract_footnotes(doc) if config.FOOTNOTES else {}
+            structure = build_structure(doc)
+
+            warnings: list[str] = []
+            visuals: dict[int, list[str]] = {}
+            vision_pages = select_pages(doc)
+            if vision_pages:
+                report("vision", 0, len(vision_pages))
+                try:
+                    visuals, warnings = transcribe(
+                        self.llm, data, doc, vision_pages, lambda d, t: report("vision", d, t)
+                    )
+                except Exception as exc:  # vision is an enrichment, never a blocker
+                    warnings.append(f"Chart transcription skipped: {exc}")
+
+            report("chunking")
+            chunks, parents = make_chunks(doc, structure, notes, visuals)
+            if not chunks:
+                raise ValueError(
+                    f"No readable text found in '{file_name}'. It may be a scanned or "
+                    "image-only PDF, which would need OCR before it can be indexed."
                 )
 
-        if not pending:
-            raise ValueError(
-                f"No readable text found in '{file_name}'. It may be a scanned or "
-                "image-only PDF, which would need OCR before it can be indexed."
+            report("embedding", 0, len(chunks))
+            vectors = self.llm.embed_documents(
+                [c["search_text"] for c in chunks], lambda d, t: report("embedding", d, t)
             )
-
-        vectors = self.embed_documents([item["text"] for item in pending])
-        for item, vector in zip(pending, vectors):
-            item["vector"] = vector
-
-        # Re-uploading a file replaces its chunks. Appending instead would leave
-        # the old copies in the index, and identical duplicates then crowd every
-        # distinct chunk out of the top-k window.
-        self.store.remove_file(file_name)
-        self.store.add(pending)
-        return len(pending)
+            aliases = {s.title: s.aliases for s in structure.sections if s.aliases}
+            record = {
+                "doc_id": doc.doc_id,
+                "file_name": file_name,
+                "title": doc.title,
+                "sha256": doc.sha256,
+                "pages": doc.page_count,
+                "profile": structure.profile,
+                "signals": structure.signals,
+                "glossary": doc.glossary,
+                "aliases": aliases,
+                "sections": [
+                    {"title": s.title, "page": s.page, "level": len(s.path)}
+                    for s in structure.sections
+                    if s.kind in ("outline", "box") or (s.kind == "heading" and len(s.path) <= 1)
+                ][:80],
+                "footnotes": len(notes),
+                "vision_pages": sorted(visuals),
+                "warnings": warnings,
+                "indexed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+            report("saving")
+            self.store.add_document(record, chunks, vectors, parents, self.llm.embedding_namespace)
+            return len(chunks)
 
     # -- guardrails -------------------------------------------------------
 
     @staticmethod
-    def _exact_id_is_missing(question: str, results: list[tuple[dict, float]]) -> bool:
+    def _exact_id_is_missing(question: str, blocks: list[dict]) -> bool:
         """True when the user asked for a specific identifier that no retrieved chunk contains.
 
         Without this, a question about "ID 006" happily retrieves the record for
@@ -389,19 +278,15 @@ class RAG:
             return False
 
         requested = match.group(1).lower().lstrip("0") or "0"
-        for item, _ in results:
-            for found in ID_RE.finditer(item["text"]):
+        for block in blocks:
+            text = block["text"]
+            for found in ID_RE.finditer(text):
                 if (found.group(1).lower().lstrip("0") or "0") == requested:
                     return False
             # Also accept a bare occurrence of the number in the chunk text.
-            if re.search(rf"\b0*{re.escape(requested)}\b", item["text"], re.IGNORECASE):
+            if re.search(rf"\b0*{re.escape(requested)}\b", text, re.IGNORECASE):
                 return False
         return True
-
-    @staticmethod
-    def _looks_like_pdf_question(question: str) -> bool:
-        words = set(re.findall(r"[a-z]+", question.lower()))
-        return bool(words & DOC_KEYWORDS)
 
     @staticmethod
     def _is_casual(question: str) -> bool:
@@ -419,11 +304,8 @@ class RAG:
 
     # -- generation -------------------------------------------------------
 
-    def _generate(self, prompt: str) -> str:
-        response = self.client.models.generate_content(
-            model=config.CHAT_MODEL, contents=prompt
-        )
-        return (response.text or "").strip()
+    def _generate(self, prompt: str, temperature: float = 0.2) -> str:
+        return self.llm.generate(prompt, temperature=temperature)
 
     def _general_answer(self, message: str) -> str:
         name = self.memory.get_fact("name")
@@ -447,111 +329,124 @@ class RAG:
             )
         )
 
-    def _grounded_answer(self, question: str, results: list[tuple[dict, float]]) -> str:
-        blocks = []
-        for i, (item, _score) in enumerate(results, start=1):
-            meta = item["metadata"]
-            blocks.append(
-                f"[SOURCE {i}] File: {meta.get('file_name')} | Page: {meta.get('page')}\n"
-                f"{item['text']}"
-            )
+    def _grounded_answer(self, question: str, blocks: list[dict], parts: list[str] | None = None) -> tuple[str, dict]:
+        context = "\n\n".join(f"{_source_label(i, b)}\n{b['text']}" for i, b in enumerate(blocks, start=1))
 
         name = self.memory.get_fact("name")
         name_line = (
             f"\nThe user's name is {name}. You may address them by name, but their name "
-            "is NOT documentation evidence.\n"
+            "is NOT document evidence.\n"
             if name
             else "\n"
         )
-
-        return self._generate(
-            GROUNDED_PROMPT.format(
-                name_line=name_line, context="\n\n".join(blocks), question=question
-            )
+        # A multi-part question becomes an explicit checklist; otherwise the
+        # model tends to answer only the first part (eval question G2).
+        parts_block = (
+            "\nThis question has several parts. Answer each one, in order, using the sources:\n"
+            + "\n".join(f"{n}. {p}" for n, p in enumerate(parts, start=1)) + "\n"
+            "For each part, find the source sentence that states that exact fact using the "
+            "question's own key words (e.g. 'deployed' -> 'deployment'), and answer from it. "
+            "Do not substitute the date or figure of a related but different event; if you "
+            "mention a related event, label it as such.\n"
+            if parts else ""
         )
+        prompt = GROUNDED_PROMPT.format(name_line=name_line, context=context, question=question, parts=parts_block)
+        answer = self._generate(prompt)
+
+        grounding = {"checked": config.GROUNDING_CHECK, "unsupported": [], "retried": False}
+        if config.GROUNDING_CHECK:
+            bad = unsupported_numbers(answer, context)
+            if bad:
+                grounding["retried"] = True
+                retry = self._generate(prompt + RETRY_NOTE.format(numbers=", ".join(bad)))
+                still = unsupported_numbers(retry, context)
+                if len(still) <= len(bad):
+                    answer, bad = retry, still
+                grounding["unsupported"] = bad
+        return answer, grounding
 
     # -- main entry point -------------------------------------------------
 
-    def ask(self, question: str) -> dict[str, Any]:
+    def ask(self, question: str, doc_ids: list[str] | None = None, debug: bool = False) -> dict[str, Any]:
         question = question.strip()
         self.memory.add_turn("user", question)
 
-        result = self._route(question)
+        result = self._route(question, doc_ids, debug)
 
         self.memory.add_turn("assistant", result["answer"])
         return result
 
-    def _route(self, question: str) -> dict[str, Any]:
+    def _route(self, question: str, doc_ids: list[str] | None, debug: bool) -> dict[str, Any]:
         """The decision tree. Order matters -- memory and small talk come before retrieval."""
 
-        # 1. Direct memory question.
-        if NAME_QUESTION_RE.search(question):
-            name = self.memory.get_fact("name")
-            answer = (
-                f"Your name is {name}."
-                if name
-                else "I don't know your name yet - tell me and I'll remember it."
-            )
-            return {"answer": answer, "sources": [], "grounded": False}
+        def plain(answer: str, extra: dict | None = None) -> dict[str, Any]:
+            out = {"answer": answer, "sources": [], "grounded": False}
+            if debug and extra:
+                out["debug"] = extra
+            return out
 
-        # 2. Name-setting message.
+        # A message can do both ("Hi, my name is Mayur. What is my name?"), so
+        # the name is saved before the memory question is answered.
         name = self._extract_name(question)
         if name:
             self.memory.set_fact("name", name)
-            return {
-                "answer": f"Nice to meet you, {name}! I'll remember that. "
-                "Ask me anything about your uploaded documentation.",
-                "sources": [],
-                "grounded": False,
-            }
+
+        # 1. Direct memory question.
+        if NAME_QUESTION_RE.search(question):
+            known = self.memory.get_fact("name")
+            return plain(
+                f"Your name is {known}."
+                if known
+                else "I don't know your name yet - tell me and I'll remember it."
+            )
+
+        # 2. Name-setting message.
+        if name:
+            self.memory.set_fact("name", name)
+            return plain(
+                f"Nice to meet you, {name}! I'll remember that. "
+                "Ask me anything about your uploaded documents."
+            )
 
         # 3. Casual conversation -- do not force this through the retriever.
         if self._is_casual(question):
-            return {"answer": self._general_answer(question), "sources": [], "grounded": False}
+            return plain(self._general_answer(question))
 
         # 4. Nothing indexed yet.
-        if not self.store.items:
-            return {"answer": self._general_answer(question), "sources": [], "grounded": False}
+        if not self.store.chunks:
+            return plain(self._general_answer(question))
 
-        # 5-6. Retrieve.
-        results = self.store.search(self.embed_query(question), config.TOP_K)
-        if not results:
-            return {"answer": self._general_answer(question), "sources": [], "grounded": False}
-
-        best_score = results[0][1]
-
-        # 7. Retrieval too weak to be treated as evidence.
-        if best_score < config.RELEVANCE_THRESHOLD:
-            return {
-                "answer": (
-                    "I couldn't find anything relevant to that in the uploaded "
-                    "documentation. If it should be in there, try rephrasing with terms "
-                    "used in the docs - or upload the file that covers it."
-                ),
-                "sources": [],
-                "grounded": False,
-            }
+        # 5-7. Retrieve; the reranker (or cosine gate) decides whether anything is evidence.
+        found = retrieve(self.store, self.llm, question, doc_ids)
+        if found.refused or not found.blocks:
+            return plain(NOT_FOUND, found.debug)
 
         # 8. A specific identifier was requested but is absent from every retrieved chunk.
-        if self._exact_id_is_missing(question, results):
-            return {
-                "answer": (
-                    "I found similar records in the documentation, but not the exact "
-                    "identifier you asked about. Rather than answer from a different "
-                    "record, I'd rather tell you it isn't there."
-                ),
-                "sources": [],
-                "grounded": False,
-            }
+        if self._exact_id_is_missing(question, found.blocks):
+            return plain(
+                "I found similar records in the documents, but not the exact "
+                "identifier you asked about. Rather than answer from a different "
+                "record, I'd rather tell you it isn't there.",
+                found.debug,
+            )
 
         # 9. Grounded answer.
-        answer = self._grounded_answer(question, results)
+        answer, grounding = self._grounded_answer(question, found.blocks, found.plan.parts)
         sources = [
             {
-                "file_name": item["metadata"].get("file_name"),
-                "page": item["metadata"].get("page"),
-                "score": round(score, 3),
+                "file_name": b["file_name"],
+                "doc_id": b["doc_id"],
+                "page": b["page"],
+                "page_end": b["page_end"],
+                "page_label": b["page_label"],
+                "section_path": b["section_path"],
+                "kind": b["kind"],
+                "score": b["score"],
+                "excerpt": b["text"][:300],
             }
-            for item, score in results
+            for b in found.blocks
         ]
-        return {"answer": answer, "sources": sources, "grounded": True}
+        out = {"answer": answer, "sources": sources, "grounded": True, "grounding": grounding}
+        if debug:
+            out["debug"] = found.debug
+        return out
